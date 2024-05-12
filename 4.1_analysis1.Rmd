@@ -1,0 +1,254 @@
+---
+title: "5.1_analysis1"
+author: "Borka Domsodi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE)
+
+# Set working directory
+setwd("~/my_computer/my_folder") # Replace with local folder path 
+
+# Load packages
+library(readxl)
+library(tidyverse)
+library(modelsummary)
+```
+
+```{r}
+# Load Data
+load("3.1_data_cleaning_output.RData")
+```
+
+### CREATE HELP COLUMNS ###
+
+```{r}
+# Get submission IDs and parent comment IDs
+comments_data$submission_id <- sub("^t3_", "", comments_data$comment_submission_id)
+comments_data$parent_id <- sub("^t1_", "", comments_data$comment_parent_id)
+
+# Delete parent ID for comments that are not replies
+comments_data <- comments_data %>% mutate(parent_id = ifelse(startsWith(parent_id, "t3_"), NA, parent_id))
+
+# Attach submission authors
+sub_authors <- select(submission_data, submission_id=id, submission_author=author)
+comments_data <- left_join(comments_data, sub_authors, by = "submission_id")
+
+# Attach parent comment authors
+com_authors <- select(comments_data, parent_id=comment_id, parent_comment_author=comment_author)
+comments_data <- left_join(comments_data, com_authors, by = "parent_id")
+
+# Clean Environment
+rm(sub_authors, com_authors)
+```
+
+### 1. NUMBER OF INTERACTIONS ###
+
+```{r}
+# Generate aggregated engagement scores of submissions
+analysis_sub <- submission_data %>% 
+  group_by(author) %>% 
+  summarise(written_submissions = n(),
+            submission_upvotes = sum(score)) %>% 
+  arrange(desc(written_submissions))
+```
+
+```{r}
+# Generate aggregated engagement scores of comments
+analysis_com <- comments_data %>% 
+  group_by(comment_author) %>% 
+  summarise(written_comments = n(),
+            comment_upvotes = sum(comment_score)) %>% 
+  rename(author=comment_author) %>% 
+  arrange(desc(written_comments))
+```
+
+```{r}
+# Generate aggregated comment numbers (excluding those written by the user)
+analysis_ib_com <- comments_data %>% 
+  filter(., !comment_author==submission_author) %>% 
+  group_by(submission_author) %>% 
+  summarise(received_comments=n()) %>% 
+  select(., author=submission_author, received_comments)
+```
+
+```{r}
+# Generate aggregated reply numbers
+
+# Get replies excluding those written by the submission author
+analysis_rep <- comments_data %>% 
+  filter(., !is.na(parent_id) & !submission_author==comment_author)
+
+# Aggregate replies on parent comment author
+analysis_rep <- analysis_rep %>%
+  group_by(parent_comment_author) %>% 
+  summarise(comment_replies = n()) %>% 
+  select(author=parent_comment_author, comment_replies)
+```
+
+```{r}
+# Merge the tables
+analysis <- full_join(analysis_com, analysis_rep, by="author")
+analysis <- full_join(analysis, analysis_sub, by="author")
+analysis <- full_join(analysis, analysis_ib_com, by="author")
+
+# Filter for selected users
+analysis <- analysis %>% 
+  filter(., author %in% user_list)
+
+# Clean Environment
+rm(analysis_com, analysis_sub, analysis_ib_com, analysis_rep)
+```
+
+```{r}
+# Fill in NA values
+analysis$written_comments[which(is.na(analysis$written_comments))] <- 0
+analysis$comment_upvotes[which(is.na(analysis$comment_upvotes))] <- 0
+analysis$comment_replies[which(is.na(analysis$comment_replies))] <- 0
+analysis$written_submissions[which(is.na(analysis$written_submissions))] <- 0
+analysis$submission_upvotes[which(is.na(analysis$submission_upvotes))] <- 0
+analysis$received_comments[which(is.na(analysis$received_comments))] <- 0
+
+# Create compound variables indicating the number of received, given and all interactions
+analysis <- analysis %>% 
+  mutate(inbound_interactions = submission_upvotes+comment_upvotes+received_comments+comment_replies,
+         outbound_interactions = written_submissions + written_comments,
+         interactions = inbound_interactions + outbound_interactions)
+
+# Clean df
+analysis <- select(analysis, author, interactions)
+```
+
+### 2. NUMBER OF CONNECTIONS ###
+
+```{r}
+# Calculate all connections for each user
+
+# Create df
+number_of_connections <- data.frame()
+
+# Iterate through each user in the list
+for(i in user_list) {
+
+  # Get all comment connections for submissions written by the user
+  connections1 <- comments_data %>% filter(., submission_author==i) %>% select(user=submission_author, connection=comment_author)
+  
+  # Get all submission connections for comments written by the user
+  connections2 <- comments_data %>% filter(., comment_author==i) %>% select(user=comment_author, connection=submission_author)
+  
+  # Get all reply connections for comments written by the user
+  connections3 <- comments_data %>% filter(., parent_comment_author==i) %>% select(user=parent_comment_author, connection=comment_author)
+  
+  # Get all comment connections for replies written by the user
+  connections4 <- comments_data %>% filter(., comment_author==i) %>% select(user=comment_author, connection=parent_comment_author)
+  
+  # Merge & aggregate
+  connections <- rbind(connections1, connections2, connections3, connections4)
+  connections <- connections %>% 
+    filter(., !user==connection) %>% 
+    unique() %>% 
+    group_by(user) %>% 
+    summarise(connections=n())
+  
+  # Bind
+  number_of_connections <- rbind(number_of_connections, connections)
+  
+  # Clean Environment
+  rm(connections, connections1, connections2, connections3, connections4, i)
+}
+```
+
+```{r}
+# Attach this column to the analysis
+number_of_connections <- select(number_of_connections, author=user, connections)
+analysis <- full_join(number_of_connections, analysis, by="author")
+rm(number_of_connections)
+```
+
+### 3. TEMPORAL FREQUENCY OF INTERACTIONS ###
+
+```{r}
+# Create df
+temporal_frequency <- data.frame()
+
+# Generate aggregated temporal frequency values for each user
+for(i in user_list) {
+
+  # Get time stamp for all submissions of the user
+  interaction_list <- submission_data %>% 
+    filter(., author==i) %>% 
+    select(., author, created)
+  
+  # Get time stamp for all comments of the user
+  interaction_list2 <- comments_data %>% 
+    filter(., comment_author==i) %>% 
+    select(., author=comment_author, created=comment_created)
+  
+  # Bind them into an interaction list
+  interaction_list <- rbind(interaction_list, interaction_list2)
+  rm(interaction_list2)
+  
+  # Create next time stamp column
+  interaction_list <- interaction_list %>%
+    arrange(created) %>%
+    mutate(next_created = lead(created),
+           time_spent = difftime(next_created, created, units = "hours"))
+  
+  # Calculate time spent between two interactions
+  interaction_list <- interaction_list %>%
+    group_by(author) %>% 
+    # filter(., time_spent<168) 
+    summarise(median_time_hours = median(time_spent, na.rm = TRUE))
+    
+  # Bind them
+  temporal_frequency <- rbind(temporal_frequency, interaction_list)
+  
+  # Clean Environment
+  rm(interaction_list, i)
+}
+
+# Cut off "hours" from the end of the values
+temporal_frequency$median_time_hours <- gsub(" hours", "", temporal_frequency$median_time_hours)
+
+# Fix NA values
+temporal_frequency$median_time_hours[which(temporal_frequency$median_time_hours=="NaN")] <- NA
+
+# Round to 1 decimal
+temporal_frequency$median_time_hours <- round(as.numeric(temporal_frequency$median_time_hours),1)
+
+# Reverse the direction so the larger the median hours between the interactions, the smaller the indicator
+temporal_frequency <- temporal_frequency %>% 
+  mutate(median_time_hours_reversed = median_time_hours*(-1))
+
+# Overwrite previous column
+temporal_frequency$median_time_hours <- temporal_frequency$median_time_hours_reversed
+temporal_frequency <- temporal_frequency %>% 
+  select(., author, median_time_hours)
+```
+
+```{r}
+# Merge to the analysis table
+analysis <- full_join(analysis, temporal_frequency, by="author")
+rm(temporal_frequency)
+```
+
+### SAVE ###
+
+```{r}
+# Where connection = NA it means that person had 0 connection
+analysis$connections[which(is.na(analysis$connections))] <- 0
+
+# The same correction cannot be used for temporal frequency, because there NA means only 1 interactions, so frequency cannot be calculated.
+```
+
+```{r}
+# Save Output
+save.image(file="4.1.1_analysis1_output.RData")
+```
+
+```{r}
+# Clean Global Environment
+rm(list = ls())
+```

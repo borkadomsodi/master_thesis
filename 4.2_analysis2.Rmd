@@ -1,0 +1,267 @@
+---
+title: "5.2.1_analysis2"
+author: "Borka Domsodi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE)
+
+# Set working directory
+setwd("~/my_computer/my_folder") # Replace with local folder path 
+
+# Load packages
+library(readxl)
+library(tidyverse)
+library(clipr)
+library(igraph)
+library(rio)
+```
+
+```{r}
+load("4.1.1_analysis1_output.RData")
+```
+
+### 1. RECIPROCITY ###
+
+```{r}
+# Create reciprocity df
+reciprocity <- data.frame()
+
+# Iterate through each selected user
+for(i in user_list) {
+
+  ## Building the directed edge list for each user's own connections
+
+  # Get all comment connections for submissions written by the user
+  edge_list1 <- comments_data %>% filter(., submission_author==i) %>% select(sender=comment_author, receiver=submission_author)
+  
+  # Get all submission connections for comments written by the user
+  edge_list2 <- comments_data %>% filter(., comment_author==i & !is.na(submission_author)) %>% select(sender=comment_author, receiver=submission_author)
+  
+  # Get all reply connections for comments written by the user
+  edge_list3 <- comments_data %>% filter(., parent_comment_author==i) %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+  # Get all comment connections for replies written by the user
+  edge_list4 <- comments_data %>% filter(., comment_author==i & !is.na(parent_comment_author)) %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+  # Merge
+  edge_list <- rbind(edge_list1, edge_list2, edge_list3, edge_list4)
+  
+  # Filter out connections with themselves, and connections with the moderator account called EDPostRequests
+  edge_list <- edge_list %>% 
+    filter(., !sender==receiver & !sender=="EDPostRequests" & !receiver=="EDPostRequests")
+  
+  ## Calculatig the number of all directed ties, number of reciprocal ties and overall reciprocity
+  
+  # Group the data by sender and receiver pairs and count occurrences
+  pair_counts <- edge_list %>%
+    group_by(sender, receiver) %>%
+    summarise(pair_count = n())
+  
+  # Filter pairs where the sender is not the selected user
+  pair_count_where_receiver <- pair_counts %>%
+    filter(sender != i) %>% 
+    select(., "user"="sender", "pair_count_where_receiver"="pair_count")
+  
+  # Filter pairs where the receiver is not the selected user
+  pair_count_where_sender <- pair_counts %>%
+    filter(receiver != i) %>% 
+    select(., "user"="receiver", "pair_count_where_sender"="pair_count")
+  
+  # Determine the minimum count between sender and receiver occurrences
+  reciprocal_pairs <- inner_join(pair_count_where_sender, pair_count_where_receiver, by = "user") %>% 
+    mutate(reciprocal_count = pmin(pair_count_where_sender, pair_count_where_receiver)) 
+  
+  # Count the number of reciprocal ties
+  reciprocal_ties <- sum(reciprocal_pairs$reciprocal_count)
+  
+    # Count the number of directed ties
+  total_directed_ties <- nrow(edge_list)
+  
+  # Create summary df
+  user_reciprocity <- reciprocal_pairs %>% 
+    group_by(sender) %>% 
+    summarize(reciprocal_ties = sum(reciprocal_count)) %>% 
+    mutate(total_directed_ties = total_directed_ties,
+           reciprocity = reciprocal_ties/total_directed_ties)
+  
+  # Bind back to the df
+  reciprocity <- rbind(reciprocity, user_reciprocity)
+}
+
+# Clean Global Environment
+rm(edge_list,edge_list1,edge_list2,edge_list3,edge_list4, pair_counts, pair_count_where_receiver, pair_count_where_sender, reciprocal_pairs, reciprocal_ties, user_reciprocity,i,total_directed_ties)
+
+# Rename author column
+reciprocity <- select(reciprocity, "author"="sender", reciprocity)
+
+# Get full user list
+users <- as.data.frame(user_list) %>%
+  rename("author"="user_list")
+
+# Fill in 0 values
+reciprocity <- left_join(users, reciprocity, by="author")
+reciprocity$reciprocity[which(is.na(reciprocity$reciprocity))] <- 0
+rm(users)
+```
+
+### 2. EGO-NETWORK DENSITY ###
+
+```{r}
+# Create dataframe
+density <- data.frame(author = character(), ego_network_density = numeric())
+
+# Get filtered network for each user
+for(i in user_list) {
+
+  ## Building the directed edge list for each user's own interactions
+
+  # Get all comment connections for submissions written by the user
+  edge_list1 <- comments_data %>% filter(., submission_author==i) %>% select(sender=comment_author, receiver=submission_author)
+  
+  # Get all submission connections for comments written by the user
+  edge_list2 <- comments_data %>% filter(., comment_author==i & !is.na(submission_author)) %>% select(sender=comment_author, receiver=submission_author)
+  
+  # Get all reply connections for comments written by the user
+  edge_list3 <- comments_data %>% filter(., parent_comment_author==i) %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+  # Get all comment connections for replies written by the user
+  edge_list4 <- comments_data %>% filter(., comment_author==i & !is.na(parent_comment_author)) %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+  # Merge
+  edge_list <- rbind(edge_list1, edge_list2, edge_list3, edge_list4) %>% unique()
+  rm(edge_list1,edge_list2,edge_list3,edge_list4)
+  
+  # Filter out connections with themselves, and connections with the moderator account called EDPostRequests
+  edge_list <- edge_list %>% 
+    filter(., !sender==receiver & !sender=="EDPostRequests" & !receiver=="EDPostRequests" & !is.na(sender) & !is.na(receiver))
+  
+  
+  ## Building the directed edge list for each user's connections' interactions
+  
+  # Get the connection list
+  connection_list <- c(edge_list$sender[which(edge_list$sender!=i)],edge_list$receiver[which(edge_list$receiver!=i)])
+
+  for(connection in connection_list) {
+    
+    # Get all comment connections for submissions written by the connection
+    edge_list1 <- comments_data %>% filter(., submission_author==connection) %>% select(sender=comment_author, receiver=submission_author)
+  
+    # Get all submission connections for comments written by the connection
+    edge_list2 <- comments_data %>% filter(., comment_author==connection & !is.na(submission_author)) %>% select(sender=comment_author, receiver=submission_author)
+  
+    # Get all reply connections for comments written by the connection
+    edge_list3 <- comments_data %>% filter(., parent_comment_author==connection) %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+    # Get all comment connections for replies written by the connection
+    edge_list4 <- comments_data %>% filter(., comment_author==connection & !is.na(parent_comment_author)) %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+    # Merge
+    edge_list <- rbind(edge_list, edge_list1, edge_list2, edge_list3, edge_list4) %>% unique()
+    rm(edge_list1,edge_list2,edge_list3,edge_list4,connection)
+  
+    # Filter out connections with themselves, and connections with the moderator account called EDPostRequests
+    edge_list <- edge_list %>% 
+    filter(., !sender==receiver & !sender=="EDPostRequests" & !receiver=="EDPostRequests" & !is.na(sender) & !is.na(receiver))
+  }
+  
+  # Filter edge list for only the user & its connections
+  user_and_connections <- c(i,connection_list)
+  edge_list <- edge_list %>% 
+    filter(sender %in% user_and_connections & receiver %in% user_and_connections)
+  
+  # Convert edge_list dataframe to a graph object
+  user_graph <- graph_from_data_frame(edge_list, directed = TRUE)
+  
+  # Calculate network density for directed graph
+  num_edges <- ecount(user_graph)  # Number of edges
+  num_nodes <- vcount(user_graph)  # Number of nodes
+  max_edges <- num_nodes * (num_nodes - 1)  # Maximum number of edges for directed graph without self-loops
+  
+  # Calculate network density
+  ego_network_density <- num_edges / max_edges
+  
+  # Create ego_network_density dataframe
+  ego_network_density <- data.frame(author=i, ego_network_density=ego_network_density)
+  
+  # Bind it to the density dataframe
+  density <- rbind(density, ego_network_density)
+  
+  # Clean Environment
+  rm(i,connection_list,user_and_connections,edge_list,num_edges,num_nodes,max_edges,user_graph,ego_network_density)
+}
+
+# Correct NA to 0
+density$ego_network_density[which(density$ego_network_density=="NaN")] <- 0
+```
+
+### 3. EIGENVECTOR CENTRALITY ###
+
+```{r}
+# Create edge lists
+
+# Get all comment - submissions connections
+edge_list1 <- comments_data %>% select(sender=comment_author, receiver=submission_author)
+  
+# Get all reply - comment connections
+edge_list2 <- comments_data %>% select(sender=comment_author, receiver=parent_comment_author)
+  
+# Merge
+edge_list <- rbind(edge_list1, edge_list2)
+  
+# Filter out connections with themselves, and connections with the moderator account called EDPostRequests
+edge_list <- edge_list %>% 
+  filter(., !sender==receiver & !sender=="EDPostRequests" & !receiver=="EDPostRequests" & !is.na(sender) & !is.na(receiver))
+  
+# Create a directed graph from the edge list dataframe
+graph <- graph_from_data_frame(edge_list, directed = TRUE)
+
+# Clean Global Environment
+rm(edge_list1,edge_list2, edge_list)
+```
+
+```{r}
+# Calculate eigenvector centrality
+eigenvector <- eigen_centrality(graph)$vector
+
+# Create a dataframe to store the centrality measures for each node
+centrality <- data.frame(
+  node = V(graph)$name,  # Node names
+  eigenvector = eigenvector
+)
+
+# Clean dataframe
+rownames(centrality) <- NULL
+centrality <- centrality %>% 
+  rename("author"="node") %>% 
+  filter(author %in% user_list)
+
+# Clean Global Environment
+rm(betweenness,closeness,eigenvector,graph)
+```
+
+### MERGE & SAVE ###
+
+```{r}
+# Join SNA variables
+sna_analysis <- full_join(density, reciprocity, by="author")
+sna_analysis <- full_join(sna_analysis, centrality, by="author")
+
+# Merge to the analysis df
+analysis <- left_join(sna_analysis, analysis, by="author")
+
+# Clean Global Environment
+rm(density,reciprocity,centrality,sna_analysis, connection)
+```
+
+```{r}
+# Save Output
+save.image(file="4.2.1_analysis2_output.RData")
+```
+
+```{r}
+# Clean Global Environment
+rm(list = ls())
+```

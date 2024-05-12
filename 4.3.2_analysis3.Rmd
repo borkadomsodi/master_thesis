@@ -1,0 +1,169 @@
+---
+title: "5.3.3_analysis3"
+author: "Borka Domsodi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE)
+
+# Set working directory
+setwd("~/my_computer/my_folder") # Replace with local folder path 
+
+# Load packages
+library(readxl)
+library(tidyverse)
+library(clipr)
+library(igraph)
+library(rio)
+```
+
+```{r}
+load("4.2.1_analysis2_output.RData")
+```
+
+```{r}
+# Overwriting comments_data with the new dataset containing the sentiment analysis labels
+comments_data <- read_excel("4.3.1.1_comments_data_sa.xlsx")
+
+# Overwriting submission_data with the new dataset containing the sentiment analysis labels
+comments_data <- read_excel("4.3.1.2_submissions_data_sa.xlsx")
+```
+
+### SENTIMENT ANALYSIS PROCESSING ###
+
+```{r}
+# Inspecting the result of the analysis
+
+# Comments Data
+table(comments_data$sentiment_label)
+
+# 126 comments were too long to be classified by the model
+# These comments will be excluded from the analysis
+
+# Submission Data
+table(submission_data$sentiment_label)
+
+# 48 submissions were too long to be classified by the model
+# These submissions will be excluded from the analysis
+```
+
+```{r}
+# Change data type to numeric
+comments_data$sentiment_label <- as.numeric(comments_data$sentiment_label)
+submission_data$sentiment_label <- as.numeric(submission_data$sentiment_label)
+
+table(comments_data$sentiment_label)
+table(submission_data$sentiment_label)
+```
+
+### COMPUTE AVERAGE SENTIMENT SCORE ###
+
+```{r}
+# Inbound Sentiment Score
+
+# Create dataframe
+inbound_sentiment <- data.frame()
+
+# Compute sentiment score for all users
+for(user in user_list) {
+
+  # Filter for comments under their submissions
+  sub_sentiment <- comments_data %>% 
+    filter(submission_author==user) %>% 
+    select(author = submission_author, sentiment_label)
+  
+  # Filter for replies under their comments
+  com_sentiment <- comments_data %>% 
+    filter(parent_comment_author==user) %>% 
+    select(author = parent_comment_author, sentiment_label)
+  
+  # Merge these two
+  sentiment_user <- rbind(sub_sentiment, com_sentiment) %>% 
+    group_by(author) %>% 
+    summarize(inbound_sentiment_score=mean(sentiment_label, na.rm=TRUE))
+  
+  # Bind to the main dataframe
+  inbound_sentiment <- rbind(inbound_sentiment, sentiment_user)
+  
+  # Clean global environment
+  rm(user, sub_sentiment, com_sentiment, sentiment_user)
+  }
+```
+
+```{r}
+# Outbound Sentiment Score
+
+# Create dataframe
+outbound_sentiment <- data.frame()
+
+# Compute sentiment score for all users
+for(user in user_list) {
+
+  # Filter for their submissions
+  sub_sentiment <- submission_data %>% 
+    filter(author==user) %>% 
+    select(author = author, sentiment_label)
+  
+  # Filter for their comments and replies
+  com_sentiment <- comments_data %>% 
+    filter(comment_author==user) %>% 
+    select(author = comment_author, sentiment_label)
+  
+  # Merge these two
+  sentiment_user <- rbind(sub_sentiment, com_sentiment) %>% 
+    group_by(author) %>% 
+    summarize(outbound_sentiment_score=mean(sentiment_label, na.rm=TRUE))
+  
+  # Bind to the main dataframe
+  outbound_sentiment <- rbind(outbound_sentiment, sentiment_user)
+  
+  # Clean global environment
+  rm(user, sub_sentiment, com_sentiment, sentiment_user)
+  }
+```
+
+### MERGE ###
+
+```{r}
+# Merge to the analysis df
+analysis <- left_join(analysis, inbound_sentiment, by="author")
+analysis <- left_join(analysis, outbound_sentiment, by="author")
+
+# Handle NAs
+analysis$outbound_sentiment_score[which(analysis$outbound_sentiment_score=="NaN")] <- NA
+
+# Clean Global Environment
+rm(inbound_sentiment, outbound_sentiment)
+```
+
+### FINALISE & CLEAN ###
+
+```{r}
+# Attach label
+analysis$label <- "-"
+analysis$label[which(analysis$author %in% recovered_list)] <- "recovered"
+analysis$label[which(analysis$author %in% non_recovered_list)] <- "non-recovered"
+
+# Filter only for labeled users
+analysis <- filter(analysis, label != "-")
+
+# Distribution of label
+table(analysis$label)
+```
+
+```{r}
+# Remove unnecessary data sets
+rm(comments_data, submission_data, manual_data, recovered_list, non_recovered_list, user_list)
+```
+
+```{r}
+# Save Output
+save.image(file="4.3.2.1_analysis3_output.RData")
+```
+
+```{r}
+# Clean Global Environment
+rm(list = ls())
+```

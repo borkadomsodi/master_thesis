@@ -1,0 +1,654 @@
+---
+title: "4.1_data_cleaning"
+author: "Borka Domsodi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE)
+
+# Set working directory
+setwd("~/my_computer/my_folder") # Replace with local folder path 
+
+# Load packages
+library(readxl)
+library(tidyverse)
+```
+
+### LOAD DATA ###
+
+```{r}
+# Select the excel file containing manual user collection
+file_path <- file.choose()
+
+# Load Data
+manual_data <- read_excel(file_path)
+
+# View Manual Data
+head(manual_data)
+```
+
+```{r}
+# Load user history collected from the Reddit API
+
+# Load Submissions
+submission_data <- read_excel("2.1_submissions_data.xlsx")
+
+# View Submissions
+head(submission_data)
+```
+
+```{r}
+# Load Comments
+comments_data <- read_excel("2.2_comments_data.xlsx")
+
+# View Comments
+head(comments_data)
+```
+
+### DEDUPLICATE ###
+
+```{r}
+# Submissions
+
+print("Number of rows before deduplication:")
+nrow(submission_data)
+
+# Deduplicate
+submission_data <- submission_data %>% distinct(url, .keep_all = TRUE)
+
+print("Number of rows after deduplication:")
+nrow(submission_data)
+```
+
+```{r}
+# Comments
+
+print("Number of rows before deduplication:")
+nrow(comments_data)
+
+# Deduplicate
+comments_data <- comments_data %>% distinct(comment_link, .keep_all = TRUE)
+
+print("Number of rows after deduplication:")
+nrow(comments_data)
+```
+
+### ASSIGN REAL AUTHORS ###
+
+```{r}
+# Search for the author EDPostRequests
+post_requests <- submission_data %>% 
+  filter(., author=="EDPostRequests")
+
+# Search for benchmark submission IDs
+benchmark_submissions <- manual_data %>% 
+  filter(., !is.null(submission_id)) %>% 
+  select(., user_name, id=submission_id)
+
+# Join the two tables
+post_requests <- left_join(post_requests, benchmark_submissions, by="id") 
+
+# Search for those needed to change authors
+post_requests <- post_requests %>% 
+  filter(!is.na(user_name)) %>% 
+  select(., id, user_name)
+
+post_requests
+```
+
+```{r}
+# Assign real authors
+# Anonymized
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+submission_data$author[which(submission_data$id=="submission_id")] <- "user_name"
+
+# Clean Environment
+rm(benchmark_submissions, post_requests)
+```
+
+### ASSIGN LABELS ###
+
+```{r}
+# Filter data for recovered users
+recovered_list <- manual_data %>% 
+  filter(., label=="recovered") %>% 
+  distinct(user_name)
+
+# Create list from usernames
+recovered_list <- as.character(recovered_list$user_name)
+```
+
+```{r}
+# Filter data for non-recovered users
+non_recovered_list <- manual_data %>% 
+  filter(., label=="non-recovered") %>% 
+  distinct(user_name)
+
+# Create list from usernames
+non_recovered_list <- as.character(non_recovered_list$user_name)
+```
+
+```{r}
+# Create list for both
+user_list <- c(recovered_list, non_recovered_list)
+user_list <- unique(user_list)
+```
+
+```{r}
+# Submissions
+submission_data$label <- "-"
+submission_data$label[which(submission_data$author %in% recovered_list)] <- "recovered"
+submission_data$label[which(submission_data$author %in% non_recovered_list)] <- "non-recovered"
+
+# Distribution of label
+table(submission_data$label)
+```
+
+```{r}
+# Comments
+comments_data$label <- "-"
+comments_data$label[which(comments_data$comment_author %in% recovered_list)] <- "recovered"
+comments_data$label[which(comments_data$comment_author %in% non_recovered_list)] <- "non-recovered"
+
+# Distribution of label
+table(comments_data$label)
+```
+
+### REMOVE DELETED USERS ###
+
+```{r}
+# Submissions Data
+submission_data <- submission_data %>% 
+  filter(., !is.na(author))
+
+# Comments Data
+comments_data <- comments_data %>% 
+  filter(., !is.na(comment_author))
+```
+
+### REVIEW DATA ###
+
+### CHECK 1: is there a user-overlap between the two groups?
+
+```{r}
+# Check for overlap
+overlap_users <- recovered_list[recovered_list %in% non_recovered_list]
+overlap_users2 <- non_recovered_list[non_recovered_list %in% recovered_list]
+
+# Display the overlapping users
+print(overlap_users)
+print(overlap_users2)
+print("There is no overlap between the two lists.")
+
+# Clean Environment
+rm(overlap_users, overlap_users2)
+```
+
+### CHECK 2: Manually cross-check 5 users of each group and see how many % was collected by the API
+
+```{r}
+# Draw a random sample of 5 items from each list
+set.seed(1)
+recovered_sample <- sample(recovered_list, size = 5, replace = FALSE)
+non_recovered_sample <- sample(non_recovered_list, size = 5, replace = FALSE)
+sample <- c(recovered_sample, non_recovered_sample)
+```
+
+```{r}
+# Submissions
+
+# User 1
+user <- sample[1]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 1 submission in the dataset, and 1 submission visible in the subreddit.
+```
+
+```{r}
+# User 2
+user <- sample[2]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 1 submission in the dataset, and 1 submission visible in the subreddit.
+```
+
+```{r}
+# User 3
+user <- sample[3]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 1 submission in the dataset, and 1 submission visible in the subreddit.
+```
+
+```{r}
+# User 4
+user <- sample[4]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 2 submissions in the dataset, and 2 submissions visible in the subreddit.
+```
+
+```{r}
+# User 5
+user <- sample[5]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 8 submissions in the dataset, and 4 submissions visible in the subreddit.
+```
+
+```{r}
+# User 6
+user <- sample[6]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 2 submissions in the dataset, and 1 submission visible in the subreddit.
+```
+
+```{r}
+# User 7
+user <- sample[7]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 1 submission in the dataset, and 0 submission visible in the subreddit.
+```
+
+```{r}
+# User 8
+user <- sample[8]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 0 submission in the dataset, and 0 submission visible in the subreddit.
+```
+
+```{r}
+# User 9
+user <- sample[9]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 1 submission in the dataset, and 1 submission visible in the subreddit.
+```
+
+```{r}
+# User 10
+user <- sample[10]
+user_submissions <- submission_data %>% 
+  filter(., author==user) %>% 
+  select(., author, title, body)
+
+user_submissions
+# This user has 2 submissions in the dataset, and 1 submission visible in the subreddit.
+```
+
+```{r}
+# Comments
+
+# User 1
+user <- sample[1]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 12 comments in the dataset, and 10 comments visible in the subreddit.
+```
+
+```{r}
+# User 2
+user <- sample[2]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 1 comment in the dataset, and 1 comment visible in the subreddit.
+```
+
+```{r}
+# User 3
+user <- sample[3]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+
+# This user has 5 comments in the dataset, and 5 comments visible in the subreddit.
+```
+
+```{r}
+# User 4
+user <- sample[4]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 16 comments in the dataset, and 10 comments visible in the subreddit.
+```
+
+```{r}
+# User 5
+user <- sample[5]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 116 comments in the dataset, and 63 comments visible in the subreddit.
+```
+
+```{r}
+# User 6
+user <- sample[6]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 1 comment in the dataset, and 1 comment visible in the subreddit.
+```
+
+```{r}
+# User 7
+user <- sample[7]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 3 comments in the dataset, and 0 comment visible in the subreddit.
+```
+
+```{r}
+# User 8
+user <- sample[8]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 3 comments in the dataset, and 2 comments visible in the subreddit.
+```
+
+```{r}
+# User 9
+user <- sample[9]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 1 comment in the dataset, and 1 comment visible in the subreddit.
+```
+
+```{r}
+# User 10
+user <- sample[10]
+user_comments <- comments_data %>% 
+  filter(., comment_author==user) %>% 
+  select(., comment_author, comment_body)
+
+user_comments
+# This user has 4 comments in the dataset, and 4 comments visible in the subreddit.
+```
+
+```{r}
+# The dataset seems to be complete
+
+# Clean Environment
+rm(user_submissions, user_comments, user, sample, recovered_sample, non_recovered_sample)
+```
+
+### CHECK 3: Recovered users -> Newer interactions -> Are they relapsing?
+
+```{r}
+# Get benchmark submission ids
+benchmark_submissions <- manual_data %>% 
+  filter(., label=="recovered" & !is.na(submission_id)) 
+benchmark_submissions <- as.character(benchmark_submissions$submission_id)
+
+# Get benchmark submissions
+benchmark_submissions <- submission_data %>% 
+  filter(., id %in% benchmark_submissions) %>% 
+  select(., author, created, body) %>% 
+  mutate(type="benchmark submission")
+
+# Get benchmark comment ids
+benchmark_comments <- manual_data %>% 
+  filter(., label=="recovered" & !is.na(comment_link)) 
+benchmark_comments$comment_id <- str_extract(benchmark_comments$comment_link, "(?<=comment/)\\w+")
+benchmark_comments <- as.character(benchmark_comments$comment_id)
+
+# Get benchmark comments
+benchmark_comments <- comments_data %>% 
+  filter(., comment_id %in% benchmark_comments) %>% 
+  select(., author=comment_author, created=comment_created, body=comment_body) %>% 
+  mutate(type="benchmark comment")
+
+# Create benchmark df
+benchmark <- rbind(benchmark_submissions, benchmark_comments)
+rm(benchmark_comments, benchmark_submissions)
+
+# Get user list
+benchmark_user_list <- as.character(benchmark$author)
+```
+
+```{r}
+# Add all posts and comments after the benchmark into this dataframe
+for (i in benchmark_user_list) {
+  
+  # Select user's benchmark
+  benchmark_created <- benchmark %>% 
+    filter(., author==i)
+  
+  # Extract benchmark date
+  benchmark_created <- benchmark_created$created
+  
+  # Add all submissions after the benchmark date
+  x <- submission_data %>% 
+    filter(., author==i, created>benchmark_created) %>% 
+    select(., author, created, body) %>% 
+    mutate(type="submission")
+  
+  # Add all comments after the benchmark date
+  y <- comments_data %>% 
+    filter(., comment_author==i, comment_created>benchmark_created) %>% 
+    select(., author=comment_author, created=comment_created, body=comment_body) %>% 
+    mutate(type="comment")
+  
+  # Bind these rows to the existing dataframe
+  benchmark <- rbind(benchmark, x, y)
+}
+
+#Filter out users who only have 1 row in the data frame
+benchmark <- benchmark %>%
+  group_by(author) %>%
+  filter(n() >= 2) %>%
+  distinct(body, .keep_all = TRUE) %>% 
+  arrange(author, created)
+
+# Clean Environment
+rm(benchmark_user_list, i, x, y, benchmark_created)
+```
+
+```{r}
+# Relapsed users - removing from recovered users
+# Anonymized
+recovered_list <- recovered_list[recovered_list != c("user_name", "user_name")]
+```
+
+### CHECK 4: Non-recovered users -> Newer interactions -> Have they recovered eventually?
+
+```{r}
+# Get benchmark submission ids
+benchmark_submissions <- manual_data %>% 
+  filter(., label=="non-recovered" & !is.na(submission_id)) 
+benchmark_submissions <- as.character(benchmark_submissions$submission_id)
+
+# Get benchmark submissions
+benchmark_submissions <- submission_data %>% 
+  filter(., id %in% benchmark_submissions) %>% 
+  select(., author, created, body) %>% 
+  mutate(type="benchmark submission")
+
+# Get benchmark comment ids
+benchmark_comments <- manual_data %>% 
+  filter(., label=="non-recovered" & !is.na(comment_link)) 
+benchmark_comments$comment_id <- str_extract(benchmark_comments$comment_link, "(?<=comment/)\\w+")
+benchmark_comments <- as.character(benchmark_comments$comment_id)
+
+# Get benchmark comments
+benchmark_comments <- comments_data %>% 
+  filter(., comment_id %in% benchmark_comments) %>% 
+  select(., author=comment_author, created=comment_created, body=comment_body) %>% 
+  mutate(type="benchmark comment")
+
+# Create benchmark df
+benchmark <- rbind(benchmark_submissions, benchmark_comments)
+rm(benchmark_comments, benchmark_submissions)
+
+# Get user list
+benchmark_user_list <- as.character(benchmark$author)
+```
+
+```{r}
+# Add all posts and comments after the benchmark into this dataframe
+for (i in benchmark_user_list) {
+  
+  # Select user's benchmark
+  benchmark_created <- benchmark %>% 
+    filter(., author==i)
+  
+  # Extract benchmark date
+  benchmark_created <- benchmark_created$created
+  
+  # Add all submissions after the benchmark date
+  x <- submission_data %>% 
+    filter(., author==i, created>benchmark_created) %>% 
+    select(., author, created, body) %>% 
+    mutate(type="submission")
+  
+  # Add all comments after the benchmark date
+  y <- comments_data %>% 
+    filter(., comment_author==i, comment_created>benchmark_created) %>% 
+    select(., author=comment_author, created=comment_created, body=comment_body) %>% 
+    mutate(type="comment")
+  
+  # Bind these rows to the existing dataframe
+  benchmark <- rbind(benchmark, x, y)
+}
+
+#Filter out users who only have 1 row in the data frame
+benchmark <- benchmark %>%
+  group_by(author) %>%
+  filter(n() >= 2) %>%
+  distinct(body, .keep_all = TRUE) %>% 
+  arrange(author, created)
+
+# Clean Environment
+rm(benchmark_user_list, i, x, y, benchmark_created)
+```
+
+```{r}
+# Recovered users - removing from non-recovered users
+# Anonymized
+non_recovered_list <- non_recovered_list[non_recovered_list != "user_name"]
+
+# Clean Enviornment
+rm(benchmark)
+```
+
+### REASSIGN LABELS ###
+
+```{r}
+# Submissions
+submission_data$label <- "-"
+submission_data$label[which(submission_data$author %in% recovered_list)] <- "recovered"
+submission_data$label[which(submission_data$author %in% non_recovered_list)] <- "non-recovered"
+
+# Distribution of label
+table(submission_data$label)
+```
+
+```{r}
+# Comments
+comments_data$label <- "-"
+comments_data$label[which(comments_data$comment_author %in% recovered_list)] <- "recovered"
+comments_data$label[which(comments_data$comment_author %in% non_recovered_list)] <- "non-recovered"
+
+# Distribution of label
+table(comments_data$label)
+```
+
+```{r}
+# Manual Data
+manual_data$label <- "-"
+manual_data$label[which(manual_data$user_name %in% recovered_list)] <- "recovered"
+manual_data$label[which(manual_data$user_name %in% non_recovered_list)] <- "non-recovered"
+
+# Drop rows
+manual_data <- manual_data %>% filter(label != "-")
+
+# Distribution of label
+table(manual_data$label)
+```
+
+### DISTRIBUTION OF THE TWO GROUPS ###
+
+```{r}
+print("Distribution of the two user groups:")
+table(manual_data$label)
+```
+
+### SAVE FINAL DATA ###
+
+```{r}
+# Overwrite Datasets with cleaned
+export(submission_data, "2.1_submissions_data.xlsx")
+export(comments_data, "2.2_comments_data.xlsx")
+```
+
+```{r}
+# Save Output
+save.image(file="3.1_data_cleaning_output.RData")
+```
+
+```{r}
+# Clean Global Environment
+rm(list = ls())
+```
+

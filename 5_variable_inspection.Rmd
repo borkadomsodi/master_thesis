@@ -1,0 +1,581 @@
+---
+title: "6.1_model_building"
+author: "Borka Domsodi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE)
+
+# Set working directory
+setwd("~/my_computer/my_folder") # Replace with local folder path 
+
+# Load packages
+library(readxl)
+library(tidyverse)
+library(modelsummary)
+library(stargazer)
+library(pscl)
+```
+
+```{r}
+# Load Data
+load("4.3.2.1_analysis3_output.RData")
+```
+
+### DATA PREPARATION ### 
+
+```{r}
+# Fix NA values where possible
+
+# Where sentiment_score is NA, let's put it to 0 which means complete neutrality
+analysis$inbound_sentiment_score[which(is.na(analysis$inbound_sentiment_score))] <- 0
+analysis$outbound_sentiment_score[which(is.na(analysis$outbound_sentiment_score))] <- 0
+
+# Rename to align
+analysis$sentiment_score <- analysis$inbound_sentiment_score
+```
+
+```{r}
+# Recode binary outcome variable into a dubbmy variable so it fits the model
+analysis$label_dummy <- 0
+analysis$label_dummy[which(analysis$label=="recovered")] <- 1
+
+table(analysis$label, analysis$label_dummy)
+```
+
+```{r}
+# Handling missing values
+
+# Count the number of rows where any column is NA
+num_rows_with_na <- sum(rowSums(is.na(analysis)) > 0)
+
+# Print the number of rows with NA values
+cat("Number of rows with NA values:", num_rows_with_na, "\n")
+rm(num_rows_with_na)
+```
+
+```{r}
+# Omitting missing values
+analysis_complete <- analysis[complete.cases(analysis), ]
+
+# Inspecting the label distribution with the smaller sample
+table(analysis_complete$label)
+```
+
+### CREATING COMPOUND VARIABLES I.: SOCIAL INTERGATION ###
+
+```{r}
+# Inspecting the items one by one
+
+# Visualize the distribution of Interactions
+ggplot(analysis_complete, aes(interactions)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=16,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Distribution of Number of Interactions")
+```
+
+```{r}
+# Visualize the distribution of Connections
+ggplot(analysis_complete, aes(connections)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=16,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Distribution of Connections")
+```
+
+```{r}
+# Visualize the distribution of Median Temporal Frequency of Interactions
+ggplot(analysis_complete, aes(-median_time_hours)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=16,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Median Hours Spent Between two Interactions")
+```
+
+```{r}
+# Excluding a few outliers so the distributions are less skewed
+analysis_complete_cleaned <- analysis_complete[which(analysis_complete$median_time_hours > -2000),]
+analysis_complete_cleaned <- analysis_complete_cleaned[which(analysis_complete_cleaned$interactions < 750),]
+analysis_complete_cleaned <- analysis_complete_cleaned[which(analysis_complete_cleaned$connections < 180),]
+
+# Number of excluded cases
+old <- nrow(analysis_complete)
+new <- nrow(analysis_complete_cleaned)
+number_of_excluded <- old - new
+print(paste("Number of excluded cases:", number_of_excluded))
+
+# Clean Environment
+analysis_complete <- analysis_complete_cleaned
+rm(old, new, number_of_excluded, analysis_complete_cleaned)
+
+# Inspecting the label distribution of this reduced sample
+table(analysis_complete$label)
+```
+
+```{r}
+# Let's look at the charts again
+
+# Visualize the distribution of Interactions
+ggplot(analysis_complete, aes(interactions)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=24,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Number of Interactions")
+
+ggsave("5.1.0_interactions.jpg")
+```
+
+```{r}
+# Visualize the distribution of Connections
+ggplot(analysis_complete, aes(connections)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=24,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Number of Connections")
+
+ggsave("5.1.1_connections.jpg")
+```
+
+```{r}
+# Visualize the distribution of Median Temporal Frequency of Interactions
+ggplot(analysis_complete, aes(round(-median_time_hours))) +
+  geom_histogram(fill="#D3D3D3", binwidth=4) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=24,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Frequency of Interactions")
+
+ggsave("5.1.2_frequency.jpg")
+```
+
+```{r}
+# They look acceptable now, the compound variables can be created
+
+# Creating the index compound variable for the concept of Social Integration
+
+# Data
+data <- analysis_complete[, c("interactions", "connections", "median_time_hours")]
+
+# Standardize the variables
+data_standardized <- scale(data)
+
+# Compute the index
+index <- rowSums(data_standardized)/3
+
+# Add the index as a new variable to the analysis dataframe
+analysis_complete$social_integration_index <- index
+
+# Clean Environment
+rm(index, data, data_standardized)
+```
+
+```{r}
+# Visualize the distribution of the Social Integration Index
+ggplot(analysis_complete, aes(social_integration_index)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Social Integration Index")
+
+ggsave("5.1.3_social_integration_index.jpg")
+```
+
+### CREATING COMPOUND VARIABLES II.: SOCIAL NETWORK STRUCTURE ###
+
+```{r}
+# Inspecting the items one by one
+
+# Visualize the distribution of Reciprocity
+ggplot(analysis_complete, aes(reciprocity)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=24,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Reciprocity")
+
+ggsave("5.1.4_reciprocity.jpg")
+```
+
+```{r}
+# Visualize the distribution of Ego-Network Denisty
+ggplot(analysis_complete, aes(round(ego_network_density,2))) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=24,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Ego-Network Density")
+
+ggsave("5.1.5_ego_network_density.jpg")
+```
+
+```{r}
+# Visualize the distribution of Eigenvector Centrality
+ggplot(analysis_complete, aes(x = eigenvector)) +
+  geom_histogram(fill = "#D3D3D3") +
+  scale_y_log10() +  # Use logarithmic scale on y-axis
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 24, family = "serif")) +
+  labs(x = "",
+       y = "",
+       title = "Log of Eigenvector Centrality")
+
+ggsave("5.1.6_eigenvector_centrality.jpg")
+
+# Since I took the log of the values, some values have turned into positive or negative infinite, these were eliminated from the graph
+```
+
+```{r}
+# Creating the index compound variable for the concept of Social Network Structure
+
+# Data
+data <- analysis_complete[, c("reciprocity", "ego_network_density", "eigenvector")]
+
+# Standardize the variables
+data_standardized <- scale(data)
+
+# Compute the index
+index <- rowSums(data_standardized)/3
+
+# Add the index as a new variable to the analysis dataframe
+analysis_complete$social_network_structure_index <- index
+
+# Clean Environment
+rm(index, data, data_standardized)
+```
+
+```{r}
+# Visualize the distribution of the Social Network Structure Index
+ggplot(analysis_complete, aes(social_network_structure_index)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Social Network Structure Index")
+
+ggsave("5.1.7_social_network_structure_index.jpg")
+```
+
+### CREATING COMPOUND VARIABLES III.: SOCIAL SUPPORT ###
+
+```{r}
+# Inspecting the items one by one
+
+# Visualize the distribution of the Social Integration Index once again
+ggplot(analysis_complete, aes(social_integration_index)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="Social Integration Index",
+       y="Number of Users",
+       title="Distribution of the Social Integration Index")
+```
+
+```{r}
+# Visualize the distribution of the Social Network Structure Index once again
+ggplot(analysis_complete, aes(social_network_structure_index)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="",
+       y="",
+       title="Distribution of the Social Network Structure Index")
+```
+
+```{r}
+# Visualize the distribution of Relational Content represented by the Sentiment Score
+ggplot(analysis_complete, aes(sentiment_score)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="Sentiment Score",
+       y="Number of Users",
+       title="Relational Content")
+
+ggsave("5.1.8_relational_content.jpg")
+```
+
+```{r}
+# Creating the index compound variable for the concept of Social Support
+
+# Data
+data <- analysis_complete[, c("social_integration_index", "social_network_structure_index", "sentiment_score")]
+
+# Standardize the variables
+data_standardized <- scale(data)
+
+# Compute the index
+index <- rowSums(data_standardized)/3
+
+# Add the index as a new variable to the analysis dataframe
+analysis_complete$social_support_index <- index
+
+# Clean Environment
+rm(index, data, data_standardized)
+```
+
+```{r}
+# Visualize the distribution of the Social Support Index
+ggplot(analysis_complete, aes(social_support_index)) +
+  geom_histogram(fill="#D3D3D3") +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="Social Support",
+       y="Number of Users",
+       title="Social Support Index")
+
+ggsave("5.1.9_social_support_index.jpg")
+```
+
+```{r}
+# Visualize the distribution of the Social Support Index
+ggplot(analysis_complete, aes(label)) +
+  geom_bar(fill="#D3D3D3") +
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-0.5, size=3) +  # Add text labels
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12,  family="serif")) +
+  labs(x="Recovery Label",
+       y="Number of Users",
+       title="Recovery Label")
+
+ggsave("5.1.10_recovery_label.jpg")
+```
+
+### INSPECTION OF BINARY RELATIONSHIPS ###
+
+```{r}
+# Inspecting the relationship between Social Integration and Recovery
+ggplot(analysis_complete, aes(x=label, y=social_integration_index)) +
+  geom_violin(aes(fill=age), color="#D3D3D3", fill="#D3D3D3") +
+  geom_boxplot() +
+  geom_jitter(width = 0.3, col="#404040", size=0.5) + 
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(text=element_text(size=12, family="serif", color="#404040")) +
+  labs(x="", y="", title="Distribution of Social Integration by Recovery Label") +
+  stat_compare_means(method = "t.test", label.x.npc = "middle", label.y = 3)
+
+ggsave("5.2.1_bivariate1.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Social Network Structure and Recovery
+ggplot(analysis_complete, aes(x=label,y=social_network_structure_index)) +
+  geom_violin(aes(fill=age), color="#D3D3D3", fill="#D3D3D3") +
+  geom_boxplot() +
+  geom_jitter(width = 0.3, col="#404040", size=0.5) + 
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(text=element_text(size=12,  family="serif", color="#404040")) +
+  labs(x="",
+       y="",
+       title="Distribution of Social Network Structure by Recovery Label") +
+  stat_compare_means(method = "t.test", label.x.npc = "middle", label.y = 2.2)
+
+ggsave("5.2.2_bivariate2.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Relational Content and Recovery
+ggplot(analysis_complete, aes(x=label,y=sentiment_score)) +
+  geom_violin(aes(fill=age), color="#D3D3D3", fill="#D3D3D3") +
+  geom_boxplot() +
+  geom_jitter(width = 0.3, col="#404040", size=0.5) + 
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(text=element_text(size=12,  family="serif", color="#404040")) +
+  labs(x="",
+       y="",
+       title="Distribution of Relational Content by Recovery Label") +
+  stat_compare_means(method = "t.test", label.x.npc = "middle", label.y = 1.2)
+
+ggsave("5.2.3_bivariate3.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Outbound Relational Content and Recovery
+ggplot(analysis_complete, aes(x=label,y=outbound_sentiment_score)) +
+  geom_violin(aes(fill=age), color="#D3D3D3", fill="#D3D3D3") +
+  geom_boxplot() +
+  geom_jitter(width = 0.3, col="#404040", size=0.5) + 
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(text=element_text(size=12,  family="serif", color="#404040")) +
+  labs(x="",
+       y="",
+       title="Distribution of Outbound Relational Content by Recovery Label") +
+  stat_compare_means(method = "t.test", label.x.npc = "middle", label.y = 1.2)
+
+ggsave("5.2.5_bivariate5.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Social Support and Recovery
+ggplot(analysis_complete, aes(x=label,y=social_support_index)) +
+  geom_violin(aes(fill=age), color="#D3D3D3", fill="#D3D3D3") +
+  geom_boxplot() +
+  geom_jitter(width = 0.3, col="#404040", size=0.5) + 
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(text=element_text(size=12,  family="serif", color="#404040")) +
+  labs(x="",
+       y="",
+       title="Distribution of the Social Support Index by Recovery Label")
+
+ggsave("5.2.4_bivariate4.jpg")
+```
+
+### INSPECTION OF INTERACTION BETWEEN VARIABLES ###
+
+```{r}
+# Inspecting the relationship between Social Integration and Social Network Structure
+gg <- ggplot(analysis_complete, aes(x=social_integration_index, y=social_network_structure_index, color=label)) +
+  geom_jitter(width = 0.3, size=0.5) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text=element_text(size=12, family="serif", color="#404040")) +
+  labs(x="Social Integration Index",
+       y="Social Network Structure Index",
+       title="Interaction between Social Integration and Social Network Structure") +
+  guides(color = guide_legend(title = NULL))
+
+# Calculate correlation coefficient and p-value
+res <- cor.test(analysis_complete$social_integration_index, analysis_complete$social_network_structure_index)
+
+# Format p-value
+p_value <- formatC(res$p.value, format = "f", digits = 2)
+
+# Add label with r and p-values
+gg + annotate("text", x = Inf, y = Inf, label = sprintf("r = %.2f, p = %s", res$estimate, p_value), 
+              hjust = 1, vjust = 1, size = 4, color = "black")
+
+ggsave("5.3.1_interaction1.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Social Integration and Relational Content
+gg <- ggplot(analysis_complete, aes(x = social_integration_index, y = sentiment_score, color = label)) +
+  geom_jitter(width = 0.3, size = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 12, family = "serif", color = "#404040")) +
+  labs(x = "Social Integration Index",
+       y = "Relational Content",
+       title = "Interaction between Social Integration and Relational Content") +
+  guides(color = guide_legend(title = NULL))
+
+# Calculate correlation coefficient and p-value
+res <- cor.test(analysis_complete$social_integration_index, analysis_complete$sentiment_score)
+
+# Format p-value
+p_value <- formatC(res$p.value, format = "f", digits = 2)
+
+# Add label with r and p-values
+gg + annotate("text", x = Inf, y = Inf, label = sprintf("r = %.2f, p = %s", res$estimate, p_value), 
+              hjust = 1, vjust = 1, size = 4, color = "black")
+
+
+ggsave("5.3.2_interaction2.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Social Network Structure and Relational Content
+gg <- ggplot(analysis_complete, aes(x = social_network_structure_index, y = sentiment_score, color = label)) +
+  geom_jitter(width = 0.3, size = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 12, family = "serif", color = "#404040")) +
+  labs(x = "Social Network Structure Index",
+       y = "Relational Content",
+       title = "Interaction between Social Network Structure and Relational Content") +
+  guides(color = guide_legend(title = NULL))
+
+# Calculate correlation coefficient and p-value
+res <- cor.test(analysis_complete$social_network_structure_index, analysis_complete$sentiment_score)
+
+# Format p-value
+p_value <- formatC(res$p.value, format = "f", digits = 2)
+
+# Add label with r and p-values
+gg + annotate("text", x = Inf, y = Inf, label = sprintf("r = %.2f, p = %s", res$estimate, p_value), 
+              hjust = 1, vjust = 1, size = 4, color = "black")
+
+
+ggsave("5.3.3_interaction3.jpg")
+```
+
+```{r}
+# Inspecting the relationship between Inbound Relational Content and Outbound Relational Content
+gg <- ggplot(analysis_complete, aes(y = inbound_sentiment_score, x = outbound_sentiment_score, color = label)) +
+  geom_jitter(width = 0.3, size = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        text = element_text(size = 12, family = "serif", color = "#404040")) +
+  labs(y = "Inbound Relational Content",
+       x = "Outbound Relational Content",
+       title = "Interaction between Inbound Relational Content and Outbound Relational Content") +
+  guides(color = guide_legend(title = NULL))
+
+# Calculate correlation coefficient and p-value
+res <- cor.test(analysis_complete$inbound_sentiment_score, analysis_complete$outbound_sentiment_score)
+
+# Format p-value
+p_value <- formatC(res$p.value, format = "f", digits = 2)
+
+# Add label with r and p-values
+gg + annotate("text", x = Inf, y = Inf, label = sprintf("r = %.2f, p = %s", res$estimate, p_value), 
+              hjust = 1, vjust = 1, size = 4, color = "black")
+
+
+ggsave("5.3.4_interaction4.jpg")
+```
+
+### SAVE FINAL DATA ###
+
+```{r}
+# Save Output
+save.image(file="5.4_variable_inspection_output.RData")
+```
+
+```{r}
+# Clean Global Environment
+rm(list = ls())
+```

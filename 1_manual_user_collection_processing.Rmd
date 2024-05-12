@@ -1,0 +1,101 @@
+---
+title: "1.2_manual_collection_processing"
+author: "Borka Domsodi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE)
+
+# Set working directory
+setwd("~/my_computer/my_folder") # Replace with local folder path 
+
+# Load packages
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+# Select the excel file containing manual user collection
+file_path <- file.choose()
+
+# Load Data
+data <- read_excel(file_path)
+```
+
+### GET LISTS ###
+
+```{r}
+# Usernames
+
+# Create list of usernames
+usernames <- as.character(data$user_name)
+usernames <- sprintf("'%s'", paste(usernames, collapse = "', '"))
+print("Usernames:")
+usernames
+
+# Count items to double-check
+number_of_items <- strsplit(usernames, ", ")[[1]]
+number_of_items <- length(number_of_items)
+print("Number of Usernames:")
+number_of_items
+
+# Write the string to a txt file & save to the drive
+writeLines(usernames, "1.1_usernames.txt")
+print("Username list saved to 1.1_usernames.txt.")
+```
+
+```{r}
+# Benchmark Submissions
+
+# Exclude NA values (that have benchmark-comments)
+submissions <- data %>% 
+  filter(., !is.na(submission_id))
+
+# Create list of submission IDs
+submissions <- as.character(submissions$submission_id)
+submissions <- sprintf("'%s'", paste(submissions, collapse = "', '"))
+print("Benchmark Submission IDs:")
+submissions
+
+# Count items to double-check
+user_name_list <- strsplit(submissions, ", ")[[1]]
+number_of_items <- length(user_name_list)
+print("Number of Benchmark Submission IDs:")
+number_of_items
+
+# Write the string to a txt file & save to the drive
+writeLines(submissions, "1.2_submissions.txt")
+print("Benchmark Submission IDs saved to 1.2_submissions.txt.")
+```
+
+```{r}
+# Benchmark Comments
+
+# Exclude NA values (that have benchmark-submissions)
+comments <- data %>% 
+  filter(., label=="recovered" & !is.na(comment_link))
+
+# Create list from comment links
+comments <- as.character(comments$comment_link)
+comments <- sprintf("'%s'", paste(comments, collapse = "', '"))
+print("Benchmark Comment Links:")
+comments
+
+# Count items to double-check
+number_of_items <- strsplit(comments, ", ")[[1]]
+number_of_items <- length(number_of_items)
+print("Number of Benchmark Comment Links:")
+number_of_items
+
+# Write the string to a txt file & save to the drive
+writeLines(comments, "1.3_comments.txt")
+print("Benchmark Comment links saved to 1.3_comments.txt.")
+```
+
+```{r}
+# Clean Global Environment
+rm(list = ls())
+```
+
